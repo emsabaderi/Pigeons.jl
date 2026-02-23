@@ -17,7 +17,7 @@ $FIELDS
 
     """
     Either `DynamicPPL.DefaultContext` for evaluating the full joint, or
-    `DynamicPPL.PriorContext` for evaluating only the prior.
+    `DynamicPPL.InitContext` for evaluating only the prior.
     """
     context
 

@@ -6,7 +6,7 @@ Convenience constructor for [`Pigeons.TuringLogPotential`](@ref).
 Pigeons.TuringLogPotential(model::DynamicPPL.Model, only_prior::Bool) = 
     TuringLogPotential(
         model, 
-        only_prior ? DynamicPPL.PriorContext() : DynamicPPL.DefaultContext(),
+        only_prior ? DynamicPPL.InitContext() : DynamicPPL.DefaultContext(),
         get_dimension(model)
     )
 
@@ -19,7 +19,7 @@ Pigeons.TuringLogPotential(model::DynamicPPL.Model, only_prior::Bool) =
         rethrow(e)
     end
 
-(log_potential::Pigeons.TuringLogPotential{<:Any,<:DynamicPPL.PriorContext})(vi) =
+(log_potential::Pigeons.TuringLogPotential{<:Any,<:DynamicPPL.InitContext})(vi) =
     try
         DynamicPPL.logprior(log_potential.model, vi)
     catch e
@@ -36,8 +36,8 @@ Given a `DynamicPPL.Model` from Turing.jl, create a
 Pigeons.@provides target Pigeons.TuringLogPotential(model::DynamicPPL.Model) =
     TuringLogPotential(model, false)
 
-is_fully_continuous(vi::DynamicPPL.TypedVarInfo) =
-    all(meta -> eltype(meta.vals) <: AbstractFloat, vi.metadata)
+is_fully_continuous(vi::DynamicPPL.VarInfo) =
+    all(values -> eltype(values.vals) <: AbstractFloat, vi.values)
 
 # checks needed when using gradient-based explorers
 function Pigeons.initialization(
@@ -67,7 +67,7 @@ Pigeons.initialization(
     """)
 
 function Pigeons.initialization(target::TuringLogPotential, rng::AbstractRNG, _::Int64)
-    vi = DynamicPPL.VarInfo(rng, target.model, DynamicPPL.SampleFromPrior(), DynamicPPL.PriorContext())
+    vi = DynamicPPL.VarInfo(rng, target.model, DynamicPPL.InitFromPrior())
     return DynamicPPL.link(vi, target.model)
 end
 
@@ -89,47 +89,59 @@ function LogDensityProblemsAD.ADgradient(
     kind::ADTypes.AbstractADType, 
     log_potential::TuringLogPotential, 
     replica::Pigeons.Replica
-    )
+    )    
     ldf = DynamicPPL.LogDensityFunction(
-        log_potential.model, replica.state; adtype=kind
+        log_potential.model, DynamicPPL.getlogjoint_internal, replica.state; adtype=kind
     )
     d = LogDensityProblems.dimension(log_potential)
     buffer = Pigeons.get_buffer(replica.recorders.buffers, :gradient_buffer, d)
     return Pigeons.BufferedAD(ldf, buffer, nothing, nothing)
 end
 
+
+## TODO:
+# change 
+
 # adapted from DPPL to use buffer 
 # https://github.com/TuringLang/DynamicPPL.jl/blob/fb5413f482b962d97b6e4728d560297cd713c295/src/logdensityfunction.jl#L202
 function LogDensityProblems.logdensity_and_gradient(
     b::Pigeons.BufferedAD{<:DynamicPPL.LogDensityFunction},
-    x::AbstractVector
+    params::AbstractVector
     )
-    f = b.enclosed
+    ldf = b.enclosed
     buffer = b.buffer
 
-    f.prep === nothing &&
+    ldf.prep === nothing &&
         error("Gradient preparation not available; this should not happen")
-    x = map(identity, x)  # Concretise type
+    params = convert(DynamicPPL._get_input_vector_type(ldf), params)  # Concretise type
     # Make branching statically inferrable, i.e. type-stable (even if the two
     # branches happen to return different types)
-    return if DynamicPPL.use_closure(f.adtype)
+    return if DynamicPPL._use_closure(ldf.adtype)
         DI.value_and_gradient!(
-            x -> DynamicPPL.logdensity_at(x, f.model, f.varinfo, f.context),
+            DynamicPPL.LogDensityAt(
+                ldf.model,
+                ldf._getlogdensity,
+                ldf._varname_ranges,
+                ldf.transform_strategy,
+                ldf._accs,
+            ),
             buffer,
-            f.prep, 
-            f.adtype, 
-            x
+            ldf._adprep,
+            ldf.adtype,
+            params,
         )
     else
         DI.value_and_gradient!(
             DynamicPPL.logdensity_at,
             buffer,
-            f.prep,
-            f.adtype,
-            x,
-            DI.Constant(f.model),
-            DI.Constant(f.varinfo),
-            DI.Constant(f.context),
+            ldf._adprep,
+            ldf.adtype,
+            params,
+            DI.Constant(ldf.model),
+            DI.Constant(ldf._getlogdensity),
+            DI.Constant(ldf._varname_ranges),
+            DI.Constant(ldf.transform_strategy),
+            DI.Constant(ldf._accs),
         )
     end
 end
