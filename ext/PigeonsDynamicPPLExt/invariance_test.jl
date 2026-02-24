@@ -43,7 +43,7 @@ function Pigeons.forward_sample_condition_and_explore(
 
     # make a (concretely-)typed version of cond_vi, then transform it to 
     # unconstrained space 
-    state = DynamicPPL.TypedVarInfo(cond_vi) # no-op when cond_vi is typed
+    state = DynamicPPL.VarInfo(cond_vi) # no-op when cond_vi is typed
     state = DynamicPPL.link(state, conditioned_model)
 
     # maybe take a step with explorer
