@@ -59,13 +59,13 @@ Pigeons.variable(state::DynamicPPL.VarInfo, name::Symbol) =
     end
 
 
-# Pigeons.update_state!(vi::DynamicPPL.VarInfo, name::Symbol, index::Int, value) =
+# Pigeons.update_state!(vi::DynamicPPL.TypedVarInfo, name::Symbol, index::Int, value) =
 #     vi.metadata[name].vals[index] = value
 
-function Pigeons.update_state!(vi::DynamicPPL.TypedVarInfo, ::Symbol, index::Int, value)
+function Pigeons.update_state!(vi::DynamicPPL.VarInfo, ::Symbol, index::Int, value)
     vals = collect(DynamicPPL.getindex_internal(vi, :))  # flattened internal vector
     vals[index] = value
-    return DynamicPPL.unflatten!!(vi, vals)
+    return DynamicPPL.unflatten!!(vi, vals) 
 end
 
 
