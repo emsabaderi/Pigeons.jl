@@ -6,7 +6,7 @@ To activate the environment for DynamicPPL testing, from the root of the Pigeons
 
 ```
 julia 
-include("test/supporting/with-dynamicppl.jl")
+include("test/supporting/with-dynamicppl-extension.jl")
 ```
 
 Then to setup for running tests in test folder type:
