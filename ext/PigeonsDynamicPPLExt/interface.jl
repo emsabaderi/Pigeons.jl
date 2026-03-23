@@ -4,32 +4,23 @@ $SIGNATURES
 Convenience constructor for [`Pigeons.TuringLogPotential`](@ref).
 """
 
-# set default arguments for DynamicPPL.InitContext
-DynamicPPL.InitContext() = DynamicPPL.InitContext(InitFromPrior(),UnlinkAll())
+function Pigeons.TuringLogPotential(model::DynamicPPL.Model, only_prior::Bool)
+    getlogdensity = only_prior ? DynamicPPL.getlogprior_internal : DynamicPPL.getlogjoint_internal
 
-Pigeons.TuringLogPotential(model::DynamicPPL.Model, only_prior::Bool) = 
-    TuringLogPotential(
-        model, 
-        only_prior ? DynamicPPL.InitContext() : DynamicPPL.DefaultContext(),
-        get_dimension(model)
-    )
+    # I assume you want to evaluate logp in linked space, using parameters in linked space.
+    ldf = LogDensityFunction(model, getlogdensity, LinkAll())
 
+    return TuringLogPotential(model, ldf, LogDensityProblems.dimension(ldf))
+end
 
-(log_potential::Pigeons.TuringLogPotential{<:Any,<:DynamicPPL.DefaultContext})(vi) =
+function (log_potential::Pigeons.TuringLogPotential)(vi)
     try
-        DynamicPPL.logjoint(log_potential.model, vi)
+        LogDensityProblems.logdensity(log_potential.ldf, vi[:])
     catch e
         (isa(e, DomainError) || isa(e, BoundsError)) && return -Inf
         rethrow(e)
     end
-
-(log_potential::Pigeons.TuringLogPotential{<:Any,<:DynamicPPL.InitContext})(vi) =
-    try
-        DynamicPPL.logprior(log_potential.model, vi)
-    catch e
-        (isa(e, DomainError) || isa(e, BoundsError)) && return -Inf
-        rethrow(e)
-    end
+end
 
 """
 $SIGNATURES

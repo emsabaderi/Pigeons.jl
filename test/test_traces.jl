@@ -1,8 +1,6 @@
 using MCMCChains
 using DynamicPPL
 using BridgeStan
-using DynamicPPL
-using BridgeStan
 
 @testset "Sample matrix" begin
     for extended_traces in [true, false]
