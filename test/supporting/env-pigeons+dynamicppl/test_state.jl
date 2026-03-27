@@ -4,6 +4,11 @@ using DynamicPPL
 using Distributions
 using Random
 using SplittableRandoms
+using DocStringExtensions: SIGNATURES
+using LogDensityProblems
+using LogDensityProblemsAD
+using ADTypes
+using HypothesisTests
 include("../../../ext/PigeonsDynamicPPLExt/state.jl")
 include("../../../ext/PigeonsDynamicPPLExt/utils.jl")
 
@@ -11,13 +16,16 @@ include("../../../ext/PigeonsDynamicPPLExt/utils.jl")
 @model function test_model()
     α ~ Beta(1, 2)
     β ~ Beta(2, 3)
-    y ~ Binomial(10, α*β)
-    return nothing
+    n ~ Poisson(3.0) + 1
+    y ~ Binomial(n, α * β)
 end
 
-rng = MersenneTwister(2026)
+rng = SplittableRandom(2026)
 model = test_model()
 vi = DynamicPPL.VarInfo(model)
+
+vector_state = DynamicPPL.internal_values_as_vector(vi)
+println("test unflatten:", DynamicPPL.unflatten!!(vi, vector_state), "\n")
 
 @testset "variables" begin
     println("typeof(vi) = ", typeof(vi))
@@ -36,10 +44,10 @@ vi = DynamicPPL.VarInfo(model)
     # test Pigeons.variable()
     vars_of_Float64 = variables(vi, Float64)
     println("variables(vi, Float64) = ", vars_of_Float64)
-    @test length(vars_of_Float64) == 2
+    @test length(vars_of_Float64) == 2 # α, β
     vars_of_int = variables(vi, Int64)
     println("variables(vi, Int64) = ", vars_of_int)
-    @test length(vars_of_int) == 1
+    @test length(vars_of_int) == 2 # n, y
     vars_of_vector_of_Float64 = variables(vi, Vector{Float64})
     println("variables(vi, Vector{Float64}) = ", vars_of_vector_of_Float64)
     @test length(vars_of_vector_of_Float64) == 0
@@ -83,15 +91,56 @@ end
 
     @test Pigeons._recursive_equal(vi, vi_2) == false
     @test Pigeons.recursive_equal(vi, vi_2) == false
-    
+
+end
+
+
+@testset "invariance test" begin
+    @model function gaussian_model()
+        x ~ Normal(0, 1)
+    end
+    model = gaussian_model()
+    res = Pigeons.invariance_test(TuringLogPotential(model), SliceSampler(), rng)
+    println("res = ", res)
+    @show res.pvalues
+    @test res.passed
+
 end
 
 
 @testset "explorer" begin
-    #TODO
-    # test slice_sample!()
+    rng = SplittableRandom(2026)
+    @model function cont_model(y)
+        x ~ Normal(0, 1)
+        y .~ Normal(x, 1)
+    end
+    dist = Normal(0.7, 1.0)
+    y = rand(rng, dist, 1000)
+    model = cont_model(y)
 
-    # test step!()
-    
+    vi = DynamicPPL.VarInfo(model)
+    vi = last(DynamicPPL.init!!(
+        rng,
+        model,
+        vi,
+        DynamicPPL.InitFromPrior(),
+        DynamicPPL.UnlinkAll(),
+    ))
+    log_potential = TuringLogPotential(model)
+    h = SliceSampler()
+    cached_lp = -Inf
+    n = 100
+    states = Vector{Float64}(undef, n)
+    for i in 1:n
+        replica = Pigeons.Replica(vi, 1, rng, (;), 1)
+        cached_lp = Pigeons.slice_sample!(h, vi, log_potential, cached_lp, replica)
+        # println("cached_lp = ", cached_lp)
+        state = DynamicPPL.getindex_internal(vi, :)[1]
+        # println("type of state:", typeof(state))
+        # println("state:", state)
+        states[i] = state
+    end
+
+    @test abs(mean(states) - 0.7) < 0.1
 end
 

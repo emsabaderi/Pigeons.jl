@@ -89,13 +89,6 @@ end
 #=
 explorer implementations
 =#
-# function Pigeons.slice_sample!(h::SliceSampler, vi::DynamicPPL.TypedVarInfo, log_potential, cached_lp, replica)
-#     for meta in vi.metadata
-#         cached_lp = Pigeons.slice_sample!(h, meta.vals, log_potential, cached_lp, replica)
-#     end
-#     return cached_lp
-# end
-
 function Pigeons.slice_sample!(h::SliceSampler, vi::DynamicPPL.VarInfo, log_potential, cached_lp, replica)
     for vn in keys(vi)
         block = DynamicPPL.getindex_internal(vi, vn)
