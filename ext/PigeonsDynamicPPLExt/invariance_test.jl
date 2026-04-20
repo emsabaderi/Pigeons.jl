@@ -48,11 +48,13 @@ function Pigeons.forward_sample_condition_and_explore(
 
 
         vns_cond = keys(cond_vi)
-
         # set the values of cond_vi to the ones that generated the observations
-        foreach(vns_cond) do vn
-            # note: vi[vn] is always in constrained space, even if vi is linked
-            setindex!(cond_vi, vi[vn], vn)
+        for vn in vns_cond
+            cond_vi = DynamicPPL.setindex_internal!!(
+                cond_vi,
+                DynamicPPL.getindex_internal(vi, vn), # set_index!() outdated
+                vn,
+            )
         end
         DynamicPPL.logjoint(conditioned_model, cond_vi) # recompute logjoint with new values
     end
@@ -70,7 +72,8 @@ function Pigeons.forward_sample_condition_and_explore(
     end
 
     # return a flattened version of state
-    return state[:]
+    # return state[:]
+    return DynamicPPL.getindex_internal(state, :)
 end
 
 Pigeons.forward_sample_condition_and_explore(target::TuringLogPotential, args...; kwargs...) =
