@@ -104,7 +104,15 @@ function Pigeons.step!(explorer::Pigeons.GradientBasedSampler, replica, shared, 
     vector_state = Pigeons.get_buffer(replica.recorders.buffers, :flattened_vi, get_dimension(vi))
     flatten!(vi, vector_state)
     Pigeons.step!(explorer, replica, shared, vector_state)
-    replica.state = DynamicPPL.unflatten!!(vi, vector_state)
+    # replica.state = DynamicPPL.unflatten!!(vi, vector_state) <===== unflatten!! assign a reconstructed vi object to replica.state
+    i = firstindex(vector_state)
+    for vn in keys(vi)
+        block = DynamicPPL.getindex_internal(vi, vn)
+        n = length(block)
+        copyto!(block, firstindex(block), vector_state, i, n)
+        i += n
+    end
+    replica.state = vi
 end
 
 #=
