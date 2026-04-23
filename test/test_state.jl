@@ -109,14 +109,8 @@ end
     y = rand(rng, dist, 1000)
     model = cont_model(y)
 
-    vi = DynamicPPL.VarInfo(model)
-    vi = last(DynamicPPL.init!!(
-        rng,
-        model,
-        vi,
-        DynamicPPL.InitFromPrior(),
-        DynamicPPL.UnlinkAll(),
-    ))
+    vi = DynamicPPL.VarInfo(rng, model, DynamicPPL.InitFromPrior(), DynamicPPL.LinkAll())
+
     log_potential = TuringLogPotential(model)
     h = SliceSampler()
     cached_lp = -Inf
@@ -125,13 +119,14 @@ end
     for i in 1:n
         replica = Pigeons.Replica(vi, 1, rng, (;), 1)
         cached_lp = Pigeons.slice_sample!(h, vi, log_potential, cached_lp, replica)
+        inv_vi = DynamicPPL.invlink(vi, model)
+        state = DynamicPPL.getindex_internal(inv_vi, :)[1]
         # println("cached_lp = ", cached_lp)
-        state = DynamicPPL.getindex_internal(vi, :)[1]
+        # state = DynamicPPL.getindex_internal(vi, :)[1]
         # println("type of state:", typeof(state))
         # println("state:", state)
         states[i] = state
     end
-
     @test abs(mean(states) - 0.7) < 0.1
 end
 
