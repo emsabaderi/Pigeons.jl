@@ -124,18 +124,6 @@ Pigeons._recursive_equal(a::DynamicPPL.VarInfo, b::DynamicPPL.VarInfo) =
     DynamicPPL.getindex_internal(a, :) == DynamicPPL.getindex_internal(b, :)
 
 
-# Pigeons.recursive_equal(
-#     a::Union{TuringLogPotential,DynamicPPL.Model},
-#     b) = Pigeons._recursive_equal(a, b)
-
-# DynamicPPL.model has fields (:f, :args, :defaults, :context)
-function Pigeons.recursive_equal(a::DynamicPPL.Model, b::DynamicPPL.Model)
-    Pigeons.recursive_equal(a.args, b.args) &&
-        typeof(a.context) == typeof(b.context)
-end
-
-# TuringLogPotential has fields (:model, :ldf, :dimension), we skip comparing ldf
-function Pigeons.recursive_equal(a::TuringLogPotential, b::TuringLogPotential)
-    Pigeons.recursive_equal(a.model, b.model) &&
-        a.dimension == b.dimension
-end
+Pigeons.recursive_equal(
+    a::Union{TuringLogPotential, DynamicPPL.Model, DynamicPPL.LogDensityFunction},
+    b) = Pigeons._recursive_equal(a, b)
