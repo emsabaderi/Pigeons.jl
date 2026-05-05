@@ -72,7 +72,7 @@ function Pigeons.sample_names(state::DynamicPPL.VarInfo, _)
     result = Symbol[]
     syms = DynamicPPL.getsym.(keys(state))
     for sym in syms
-        var = Pigeons.variable(state, sym) 
+        var = Pigeons.variable(state, sym)
         # TODO: test up tp this point, try different data types: scalar, vector, matrix, etc to see var.
         if var isa Number || (var isa AbstractArray && length(var) == 1) # TODO: is this long predicate necessary??
             push!(result, sym)
@@ -124,6 +124,18 @@ Pigeons._recursive_equal(a::DynamicPPL.VarInfo, b::DynamicPPL.VarInfo) =
     DynamicPPL.getindex_internal(a, :) == DynamicPPL.getindex_internal(b, :)
 
 
-Pigeons.recursive_equal(
-    a::Union{TuringLogPotential,DynamicPPL.Model},
-    b) = Pigeons._recursive_equal(a, b)
+# Pigeons.recursive_equal(
+#     a::Union{TuringLogPotential,DynamicPPL.Model},
+#     b) = Pigeons._recursive_equal(a, b)
+
+# DynamicPPL.model has fields (:f, :args, :defaults, :context)
+function Pigeons.recursive_equal(a::DynamicPPL.Model, b::DynamicPPL.Model)
+    Pigeons.recursive_equal(a.args, b.args) &&
+        typeof(a.context) == typeof(b.context)
+end
+
+# TuringLogPotential has fields (:model, :ldf, :dimension), we skip comparing ldf
+function Pigeons.recursive_equal(a::TuringLogPotential, b::TuringLogPotential)
+    Pigeons.recursive_equal(a.model, b.model) &&
+        a.dimension == b.dimension
+end
