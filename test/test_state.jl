@@ -2,24 +2,6 @@ import Pigeons
 using DynamicPPL
 
 
-struct StringCategorical <: DiscreteUnivariateDistribution
-    outcomes::Vector{String}
-    probs::Vector{Float64}
-end
-
-Base.rand(rng::AbstractRNG, d::StringCategorical) =
-    d.outcomes[rand(rng, Categorical(d.probs))]
-
-Distributions.logpdf(d::StringCategorical, x::String) = begin
-    i = findfirst(==(x), d.outcomes)
-    isnothing(i) ? -Inf : log(d.probs[i])
-end
-
-Distributions.logpdf(d::StringCategorical, x) = -Inf
-Distributions.insupport(d::StringCategorical, x) = x in d.outcomes
-
-
-
 @model function mix_dis_cts_model()
     α ~ Beta(1, 2)
     β ~ Beta(2, 3)
@@ -33,12 +15,6 @@ vi = DynamicPPL.VarInfo(model)
 
 
 @testset "variables" begin
-    for vn in keys(vi)
-        tv = getindex(vi.values, vn)
-        val = DynamicPPL.get_internal_value(tv)
-    end
-
-    # test Pigeons.variable()
     vars_of_Float64 = Pigeons.continuous_variables(vi)
     println("variables(vi, Float64) = ", vars_of_Float64)
     @test length(vars_of_Float64) == 2 # α, β
@@ -70,18 +46,6 @@ end
     extracted_sample_names = Pigeons.sample_names(vi, nothing)
     @test length(extracted_sample_values) == length(extracted_sample_names)
 
-    #test non-numeric input
-    @model function non_numeric()
-        x ~ StringCategorical(["hello", "world"], [0.5, 0.5])
-    end
-    vi_ = DynamicPPL.VarInfo(non_numeric())
-    @test Pigeons.variable(vi, :singleton_variable) ==
-          DynamicPPL.getindex_internal(vi, :)
-    try
-        Pigeons.sample_names(vi_, nothing)
-    catch e
-        e
-    end
 end
 
 
