@@ -3,29 +3,27 @@ $SIGNATURES
 
 Convenience constructor for [`Pigeons.TuringLogPotential`](@ref).
 """
-Pigeons.TuringLogPotential(model::DynamicPPL.Model, only_prior::Bool) = 
-    TuringLogPotential(
-        model, 
-        only_prior ? DynamicPPL.PriorContext() : DynamicPPL.DefaultContext(),
-        get_dimension(model)
-    )
 
+function Pigeons.TuringLogPotential(model::DynamicPPL.Model, only_prior::Bool)
+    getlogdensity = only_prior ? DynamicPPL.getlogprior_internal : DynamicPPL.getlogjoint_internal
 
-(log_potential::Pigeons.TuringLogPotential{<:Any,<:DynamicPPL.DefaultContext})(vi) =
+    # workaround to avoid touching global rng
+    tmp_rng = Xoshiro(468)
+    accs = OnlyAccsVarInfo(VectorValueAccumulator())
+    _, accs = init!!(tmp_rng, model, accs, InitFromPrior(), LinkAll())
+    ldf = LogDensityFunction(model, getlogdensity, accs)
+
+    return TuringLogPotential(model, ldf, LogDensityProblems.dimension(ldf))
+end
+
+function (log_potential::Pigeons.TuringLogPotential)(vi)
     try
-        DynamicPPL.logjoint(log_potential.model, vi)
+        LogDensityProblems.logdensity(log_potential.ldf, vi[:])
     catch e
         (isa(e, DomainError) || isa(e, BoundsError)) && return -Inf
         rethrow(e)
     end
-
-(log_potential::Pigeons.TuringLogPotential{<:Any,<:DynamicPPL.PriorContext})(vi) =
-    try
-        DynamicPPL.logprior(log_potential.model, vi)
-    catch e
-        (isa(e, DomainError) || isa(e, BoundsError)) && return -Inf
-        rethrow(e)
-    end
+end
 
 """
 $SIGNATURES
@@ -36,8 +34,8 @@ Given a `DynamicPPL.Model` from Turing.jl, create a
 Pigeons.@provides target Pigeons.TuringLogPotential(model::DynamicPPL.Model) =
     TuringLogPotential(model, false)
 
-is_fully_continuous(vi::DynamicPPL.TypedVarInfo) =
-    all(meta -> eltype(meta.vals) <: AbstractFloat, vi.metadata)
+is_fully_continuous(vi::DynamicPPL.VarInfo) =
+    all(values -> eltype(values.val) <: AbstractFloat, vi.values.data)
 
 # checks needed when using gradient-based explorers
 function Pigeons.initialization(
@@ -67,8 +65,10 @@ Pigeons.initialization(
     """)
 
 function Pigeons.initialization(target::TuringLogPotential, rng::AbstractRNG, _::Int64)
-    vi = DynamicPPL.VarInfo(rng, target.model, DynamicPPL.SampleFromPrior(), DynamicPPL.PriorContext())
-    return DynamicPPL.link(vi, target.model)
+    vi = DynamicPPL.VarInfo(rng, target.model, DynamicPPL.InitFromPrior())
+    vi = DynamicPPL.link(vi, target.model)
+    # DynamicPPL.unflatten!! will force all variables(dis/cts) into Float!
+    return vi
 end
 
 # At the moment, AutoMALA assumes a :singleton_variable structure
@@ -89,47 +89,56 @@ function LogDensityProblemsAD.ADgradient(
     kind::ADTypes.AbstractADType, 
     log_potential::TuringLogPotential, 
     replica::Pigeons.Replica
-    )
+    )    
     ldf = DynamicPPL.LogDensityFunction(
-        log_potential.model, replica.state; adtype=kind
+        log_potential.model, DynamicPPL.getlogjoint_internal, replica.state; adtype=kind
     )
     d = LogDensityProblems.dimension(log_potential)
     buffer = Pigeons.get_buffer(replica.recorders.buffers, :gradient_buffer, d)
     return Pigeons.BufferedAD(ldf, buffer, nothing, nothing)
 end
 
+
 # adapted from DPPL to use buffer 
 # https://github.com/TuringLang/DynamicPPL.jl/blob/fb5413f482b962d97b6e4728d560297cd713c295/src/logdensityfunction.jl#L202
 function LogDensityProblems.logdensity_and_gradient(
     b::Pigeons.BufferedAD{<:DynamicPPL.LogDensityFunction},
-    x::AbstractVector
+    params::AbstractVector
     )
-    f = b.enclosed
+    ldf = b.enclosed
     buffer = b.buffer
 
-    f.prep === nothing &&
+    ldf._adprep === nothing &&
         error("Gradient preparation not available; this should not happen")
-    x = map(identity, x)  # Concretise type
+    params = convert(DynamicPPL.get_input_vector_type(ldf), params)  # Concretise type
     # Make branching statically inferrable, i.e. type-stable (even if the two
     # branches happen to return different types)
-    return if DynamicPPL.use_closure(f.adtype)
+    return if DynamicPPL._use_closure(ldf.adtype)
         DI.value_and_gradient!(
-            x -> DynamicPPL.logdensity_at(x, f.model, f.varinfo, f.context),
+            DynamicPPL.LogDensityAt(
+                ldf.model,
+                ldf._getlogdensity,
+                ldf._varname_ranges,
+                ldf.transform_strategy,
+                ldf._accs,
+            ),
             buffer,
-            f.prep, 
-            f.adtype, 
-            x
+            ldf._adprep,
+            ldf.adtype,
+            params,
         )
     else
         DI.value_and_gradient!(
             DynamicPPL.logdensity_at,
             buffer,
-            f.prep,
-            f.adtype,
-            x,
-            DI.Constant(f.model),
-            DI.Constant(f.varinfo),
-            DI.Constant(f.context),
+            ldf._adprep,
+            ldf.adtype,
+            params,
+            DI.Constant(ldf.model),
+            DI.Constant(ldf._getlogdensity),
+            DI.Constant(ldf._varname_ranges),
+            DI.Constant(ldf.transform_strategy),
+            DI.Constant(ldf._accs),
         )
     end
 end

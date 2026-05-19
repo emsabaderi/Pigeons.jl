@@ -1,9 +1,15 @@
 # grouping of variables
-variables(vi::DynamicPPL.TypedVarInfo{<:NamedTuple{names}}, ::Type{T}) where {names,T} =
-    [name for (name, meta) in zip(names, vi.metadata) if eltype(meta.vals) <: T]
-Pigeons.continuous_variables(state::DynamicPPL.TypedVarInfo) = variables(state::DynamicPPL.TypedVarInfo, AbstractFloat)
-Pigeons.discrete_variables(state::DynamicPPL.TypedVarInfo) = variables(state::DynamicPPL.TypedVarInfo, Integer)
-function Pigeons.recorded_continuous_variables(vi::DynamicPPL.TypedVarInfo)
+function variables(vi::DynamicPPL.VarInfo, ::Type{T}) where {T}
+    vns = keys(vi)
+    # use Symbol instead of DynamicPPL.getsym.(vns) to avoid potential conflicts, see: https://github.com/Julia-Tempering/Pigeons.jl/pull/409#discussion_r2962749585
+    syms = Symbol.(vns)
+    return [sym for (sym, vn) in zip(syms, vns) if eltype(DynamicPPL.getindex_internal(vi, vn)) <: T]
+end
+
+
+Pigeons.continuous_variables(state::DynamicPPL.VarInfo) = variables(state::DynamicPPL.VarInfo, AbstractFloat)
+Pigeons.discrete_variables(state::DynamicPPL.VarInfo) = variables(state::DynamicPPL.VarInfo, Integer)
+function Pigeons.recorded_continuous_variables(vi::DynamicPPL.VarInfo)
     cvars = Pigeons.continuous_variables(vi)
 
     # allows us to handle samplers with adaptive preconditioners, which *may* be
@@ -15,39 +21,46 @@ end
 
 # note: this returns unconstrained parameters when the varinfo is linked 
 # (default in pigeons as of Jul-24), and constrained otherwise
-Pigeons.variable(state::DynamicPPL.TypedVarInfo, name::Symbol) = 
+Pigeons.variable(state::DynamicPPL.VarInfo, name::Symbol) =
     if name === :singleton_variable
-        state[:]
+        DynamicPPL.getindex_internal(state, :)
     else
-        state.metadata[name].vals
+        vns = [vn for vn in keys(state) if Symbol(vn) === name]
+        mapreduce(vn -> DynamicPPL.getindex_internal(state, vn), vcat, vns)
     end
 
-Pigeons.update_state!(vi::DynamicPPL.TypedVarInfo, name::Symbol, index::Int, value) =
-    vi.metadata[name].vals[index] = value
+
+function Pigeons.update_state!(vi::DynamicPPL.VarInfo, name::Symbol, index::Int, value)
+    vns = [vn for vn in keys(vi) if Symbol(vn) === name]
+    vn = vns[1]
+    vals = DynamicPPL.getindex_internal(vi, vn)
+    vals[index] = value
+    return DynamicPPL.setindex_internal!!(vi, vals, vn)
+end
+
+
 
 # From Turing.jl/src/utilities/helper.jl
 ind2sub(v, i) = Tuple(CartesianIndices(v)[i])
 
 
-function Pigeons.extract_sample(state::DynamicPPL.TypedVarInfo, log_potential)
+function Pigeons.extract_sample(state::DynamicPPL.VarInfo, log_potential)
     invlink_vi = DynamicPPL.invlink(state, Pigeons.turing_model(log_potential))
-    result = invlink_vi[:]
+    result = invlink_vi[:] # result = DynamicPPL.getindex_internal(invlink_vi, :) is also acceptable
     push!(result, log_potential(state))
     return result
 end
 
-function Pigeons.sample_names(state::DynamicPPL.TypedVarInfo, _)
+function Pigeons.sample_names(state::DynamicPPL.VarInfo, _)
     result = Symbol[]
-    all_names = fieldnames(typeof(state.metadata))
+    all_names = DynamicPPL.getsym.(keys(state))
     for var_name in all_names
-        var = state.metadata[var_name].vals
+        var = Pigeons.variable(state, var_name)
         if var isa Number || (var isa AbstractArray && length(var) == 1)
             push!(result, var_name)
         elseif var isa AbstractArray
-            # flatten vector names following Turing convention
             for i in eachindex(var)
-                var_and_index_name =
-                    Symbol(var_name, "[", join(ind2sub(size(var), i), ","), "]")
+                var_and_index_name = Symbol(var_name, "[", join(ind2sub(size(var), i), ","), "]")
                 push!(result, var_and_index_name)
             end
         else
@@ -58,33 +71,37 @@ function Pigeons.sample_names(state::DynamicPPL.TypedVarInfo, _)
     return result
 end
 
-#=
-explorer implementations
-=#
-function Pigeons.slice_sample!(h::SliceSampler, vi::DynamicPPL.TypedVarInfo, log_potential, cached_lp, replica)
-    for meta in vi.metadata
-        cached_lp = Pigeons.slice_sample!(h, meta.vals, log_potential, cached_lp, replica)
+# explorer implementations
+function Pigeons.slice_sample!(h::SliceSampler, vi::DynamicPPL.VarInfo, log_potential, cached_lp, replica)
+    for vn in keys(vi)
+        block = DynamicPPL.getindex_internal(vi, vn)
+        cached_lp = Pigeons.slice_sample!(h, block, log_potential, cached_lp, replica)
     end
     return cached_lp
 end
 
-function Pigeons.step!(explorer::Pigeons.GradientBasedSampler, replica, shared, vi::DynamicPPL.TypedVarInfo)
+function Pigeons.step!(explorer::Pigeons.GradientBasedSampler, replica, shared, vi::DynamicPPL.VarInfo)
     vector_state = Pigeons.get_buffer(replica.recorders.buffers, :flattened_vi, get_dimension(vi))
     flatten!(vi, vector_state)
     Pigeons.step!(explorer, replica, shared, vector_state)
-    replica.state = DynamicPPL.unflatten(vi, vector_state)
+    # replica.state = DynamicPPL.unflatten!!(vi, vector_state) will assign a reconstructed vi object to replica.state
+    i = firstindex(vector_state)
+    for vn in keys(vi)
+        block = DynamicPPL.getindex_internal(vi, vn)
+        n = length(block)
+        copyto!(block, firstindex(block), vector_state, i, n)
+        i += n
+    end
+    replica.state = vi
 end
 
-#=
-specialized equality checks
-=#
-Pigeons.recursive_equal(a::DynamicPPL.TypedVarInfo, b::DynamicPPL.TypedVarInfo) =
-    # as of Nov 2023, DynamicPPL does not supply == for TypedVarInfo
-    length(a.metadata) == length(b.metadata) &&
-        sample_names(a,1) == sample_names(b,1) && # second argument is not used
-        a[:] == b[:]
-    
+# specialized equality checks
+Pigeons._recursive_equal(a::DynamicPPL.VarInfo, b::DynamicPPL.VarInfo) =
+    length(a) == length(b) &&
+    sample_names(a, 1) == sample_names(b, 1) && # second argument of sample_names() is dummy
+    DynamicPPL.getindex_internal(a, :) == DynamicPPL.getindex_internal(b, :)
+
 
 Pigeons.recursive_equal(
-    a::Union{TuringLogPotential,DynamicPPL.Model,DynamicPPL.ConditionContext}, 
+    a::Union{TuringLogPotential, DynamicPPL.Model, DynamicPPL.LogDensityFunction},
     b) = Pigeons._recursive_equal(a, b)

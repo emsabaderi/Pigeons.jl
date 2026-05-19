@@ -83,14 +83,20 @@ function test_slice_sampler_Turing()
     model = flip_model_modified()
     log_potential = TuringLogPotential(model)
     h = SliceSampler()
-    vi = DynamicPPL.VarInfo(rng, model, DynamicPPL.SampleFromPrior(), DynamicPPL.PriorContext()) 
+    vi = DynamicPPL.VarInfo(rng, model, DynamicPPL.InitFromPrior())
+    vi = DynamicPPL.link(vi, model) # make the parameter space from constrained to unconstrained
     n = 100
     states = Vector{Float64}(undef, n)
     cached_lp = -Inf
     for i in 1:n
         replica = Replica(vi, 1, rng, (;), 1)
         cached_lp = slice_sample!(h, vi, log_potential, cached_lp, replica)
-        states[i] = vi.metadata[1].vals[1]
+
+        inv_vi = DynamicPPL.invlink(vi, model) # inverse transform the unconstrained parameter space back to constrained space
+        state = DynamicPPL.getindex_internal(inv_vi, :)[1]
+        # state = DynamicPPL.getindex_internal(vi, :)[1] # this will be parameters' values from unconstrained space
+
+        states[i] = state
     end
     @test abs(mean(states) - 0.5) ≤ 0.2
 end

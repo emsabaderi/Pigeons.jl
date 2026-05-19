@@ -16,10 +16,9 @@ $FIELDS
     model
 
     """
-    Either `DynamicPPL.DefaultContext` for evaluating the full joint, or
-    `DynamicPPL.PriorContext` for evaluating only the prior.
+    Stores the LogDensityFunction of the model
     """
-    context
+    ldf
 
     """
     The total number of scalar values observed in a single random sample from `model`.

@@ -16,13 +16,13 @@ function _infer_param_element_type(
     tmix = Union{}
     for v in JuliaBUGS.Model.parameters(model)
         if !model.transformed
-            val = AbstractPPL.get(evaluation_env, v)
+            val = AbstractPPL.getvalue(evaluation_env, v)
             T = local_param_eltype(val)
         else
             (; node_function, loop_vars) = model.g[v]
             dist = node_function(evaluation_env, loop_vars)
             transformed_value = Bijectors.transform(
-                Bijectors.bijector(dist), AbstractPPL.get(evaluation_env, v)
+                Bijectors.bijector(dist), AbstractPPL.getvalue(evaluation_env, v)
             )
             T = local_param_eltype(transformed_value)
         end
@@ -43,7 +43,7 @@ function getparams(model::JuliaBUGS.BUGSModel, evaluation_env=model.evaluation_e
     pos = 1
     for v in JuliaBUGS.Model.parameters(model)
         if !model.transformed
-            val = AbstractPPL.get(evaluation_env, v)
+            val = AbstractPPL.getvalue(evaluation_env, v)
             len = model.untransformed_var_lengths[v]
             if val isa AbstractArray
                 copyto!(param_vals, pos, vec(val), 1, len)
@@ -54,7 +54,7 @@ function getparams(model::JuliaBUGS.BUGSModel, evaluation_env=model.evaluation_e
             (; node_function, loop_vars) = model.g[v]
             dist = node_function(evaluation_env, loop_vars)
             transformed_value = Bijectors.transform(
-                Bijectors.bijector(dist), AbstractPPL.get(evaluation_env, v)
+                Bijectors.bijector(dist), AbstractPPL.getvalue(evaluation_env, v)
             )
             len = model.transformed_var_lengths[v]
             if transformed_value isa AbstractArray
