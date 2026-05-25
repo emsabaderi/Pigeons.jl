@@ -45,8 +45,10 @@ ind2sub(v, i) = Tuple(CartesianIndices(v)[i])
 
 
 function Pigeons.extract_sample(state::DynamicPPL.VarInfo, log_potential)
+    result = []
     invlink_vi = DynamicPPL.invlink(state, Pigeons.turing_model(log_potential))
-    result = invlink_vi[:] # result = DynamicPPL.getindex_internal(invlink_vi, :) is also acceptable
+    # result = DynamicPPL.getindex_internal(invlink_vi, :)
+    push!(result, invlink_vi[:]...) # result = DynamicPPL.getindex_internal(invlink_vi, :) is also acceptable
     push!(result, log_potential(state))
     return result
 end
